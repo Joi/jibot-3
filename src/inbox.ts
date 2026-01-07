@@ -1,78 +1,42 @@
 /**
- * Reminder Inbox
+ * Reminder Inbox - Apple Reminders Integration
  * 
- * Allows anyone to send reminders to Joi via "remind joi to..."
- * Owner can view and clear the inbox queue.
- * Admins can view the inbox.
+ * Sends reminders to Apple Reminders app via the apple_reminders.py tool.
+ * Reminders go to a "Jibot" list for easy filtering.
  */
 
-import * as fs from "fs";
+import { execSync, exec } from "child_process";
 import * as path from "path";
 import os from "os";
 
+const REMINDERS_TOOL = path.join(os.homedir(), "amplifier", "tools", "apple_reminders.py");
+const JIBOT_LIST = "Jibot"; // Dedicated list for Jibot reminders
+
+/**
+ * Ensure the Jibot list exists (creates if needed)
+ */
+function ensureJibotList(): void {
+  try {
+    // Check if list exists by trying to list from it
+    execSync(`python3 "${REMINDERS_TOOL}" list --list "${JIBOT_LIST}" --json 2>/dev/null`, {
+      encoding: "utf-8",
+    });
+  } catch (error) {
+    // List might not exist - that's okay, it will be created on first add
+    console.log(`📋 Jibot reminders list will be created on first reminder`);
+  }
+}
+
 export interface Reminder {
   id: string;
-  message: string;
-  fromUserId: string;
-  fromDisplayName?: string;
-  workspace: string;
-  channel: string;
-  createdAt: string;
-}
-
-export interface InboxStore {
-  reminders: Reminder[];
-}
-
-const DATA_DIR = path.join(os.homedir(), "switchboard", "jibot");
-const INBOX_FILE = path.join(DATA_DIR, "inbox.json");
-
-/**
- * Ensure data directory exists
- */
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+  title: string;
+  notes?: string;
+  completed: boolean;
+  createdAt?: string;
 }
 
 /**
- * Generate a simple unique ID
- */
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-}
-
-/**
- * Load inbox
- */
-export function loadInbox(): InboxStore {
-  ensureDataDir();
-  try {
-    if (fs.existsSync(INBOX_FILE)) {
-      const data = fs.readFileSync(INBOX_FILE, "utf-8");
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error("Error loading inbox:", error);
-  }
-  return { reminders: [] };
-}
-
-/**
- * Save inbox
- */
-export function saveInbox(store: InboxStore): void {
-  ensureDataDir();
-  try {
-    fs.writeFileSync(INBOX_FILE, JSON.stringify(store, null, 2));
-  } catch (error) {
-    console.error("Error saving inbox:", error);
-  }
-}
-
-/**
- * Add a reminder to the inbox
+ * Add a reminder to Apple Reminders
  */
 export function addReminder(
   message: string,
@@ -80,92 +44,108 @@ export function addReminder(
   workspace: string,
   channel: string,
   fromDisplayName?: string
-): Reminder {
-  const store = loadInbox();
+): { success: boolean; message: string } {
+  const from = fromDisplayName || fromUserId;
+  const notes = `From: ${from}\nWorkspace: ${workspace}\nChannel: ${channel}\nAdded via Jibot`;
   
-  const reminder: Reminder = {
-    id: generateId(),
-    message,
-    fromUserId,
-    fromDisplayName,
-    workspace,
-    channel,
-    createdAt: new Date().toISOString(),
-  };
-  
-  store.reminders.push(reminder);
-  saveInbox(store);
-  
-  console.log(`📥 New reminder from <@${fromUserId}>: "${message}"`);
-  return reminder;
+  try {
+    // Escape quotes in message and notes for shell
+    const escapedMessage = message.replace(/"/g, '\\"');
+    const escapedNotes = notes.replace(/"/g, '\\"');
+    
+    const cmd = `python3 "${REMINDERS_TOOL}" add "${escapedMessage}" --list "${JIBOT_LIST}" --notes "${escapedNotes}"`;
+    execSync(cmd, { encoding: "utf-8" });
+    
+    console.log(`📥 Added to Apple Reminders: "${message}" from ${from}`);
+    return { success: true, message };
+  } catch (error) {
+    console.error("Error adding reminder:", error);
+    return { success: false, message: `Failed to add reminder: ${error}` };
+  }
 }
 
 /**
- * Get all reminders
+ * Get all incomplete reminders from Jibot list
  */
 export function getReminders(): Reminder[] {
-  const store = loadInbox();
-  return store.reminders;
+  try {
+    const output = execSync(
+      `python3 "${REMINDERS_TOOL}" list --list "${JIBOT_LIST}" --json`,
+      { encoding: "utf-8" }
+    );
+    
+    const data = JSON.parse(output);
+    return data.reminders || [];
+  } catch (error) {
+    // List might not exist yet
+    return [];
+  }
 }
 
 /**
  * Get reminder count
  */
 export function getReminderCount(): number {
-  const store = loadInbox();
-  return store.reminders.length;
+  return getReminders().length;
 }
 
 /**
- * Clear a specific reminder by ID
+ * Complete (clear) a reminder by title
  */
-export function clearReminder(id: string): Reminder | null {
-  const store = loadInbox();
-  const index = store.reminders.findIndex(r => r.id === id);
-  
-  if (index === -1) return null;
-  
-  const [removed] = store.reminders.splice(index, 1);
-  saveInbox(store);
-  
-  console.log(`✅ Cleared reminder: "${removed.message}"`);
-  return removed;
+export function clearReminderByTitle(title: string): { success: boolean; title: string } {
+  try {
+    const escapedTitle = title.replace(/"/g, '\\"');
+    execSync(
+      `python3 "${REMINDERS_TOOL}" complete "${escapedTitle}"`,
+      { encoding: "utf-8" }
+    );
+    
+    console.log(`✅ Completed reminder: "${title}"`);
+    return { success: true, title };
+  } catch (error) {
+    console.error("Error completing reminder:", error);
+    return { success: false, title };
+  }
 }
 
 /**
- * Clear a reminder by index (1-based for user-friendliness)
+ * Complete a reminder by index (1-based)
  */
 export function clearReminderByIndex(index: number): Reminder | null {
-  const store = loadInbox();
+  const reminders = getReminders();
   const zeroIndex = index - 1;
   
-  if (zeroIndex < 0 || zeroIndex >= store.reminders.length) {
+  if (zeroIndex < 0 || zeroIndex >= reminders.length) {
     return null;
   }
   
-  const [removed] = store.reminders.splice(zeroIndex, 1);
-  saveInbox(store);
+  const reminder = reminders[zeroIndex];
+  const result = clearReminderByTitle(reminder.title);
   
-  console.log(`✅ Cleared reminder #${index}: "${removed.message}"`);
-  return removed;
+  if (result.success) {
+    return reminder;
+  }
+  return null;
 }
 
 /**
- * Clear all reminders
+ * Clear all reminders in the Jibot list
  */
 export function clearAllReminders(): number {
-  const store = loadInbox();
-  const count = store.reminders.length;
+  const reminders = getReminders();
+  let cleared = 0;
   
-  store.reminders = [];
-  saveInbox(store);
+  for (const reminder of reminders) {
+    const result = clearReminderByTitle(reminder.title);
+    if (result.success) cleared++;
+  }
   
-  console.log(`✅ Cleared all ${count} reminders`);
-  return count;
+  console.log(`✅ Cleared ${cleared} reminders`);
+  return cleared;
 }
 
 /**
- * Format reminders for display
+ * Format reminders for display in Slack
  */
 export function formatInbox(reminders: Reminder[]): string {
   if (reminders.length === 0) {
@@ -173,10 +153,19 @@ export function formatInbox(reminders: Reminder[]): string {
   }
   
   const lines = reminders.map((r, i) => {
-    const from = r.fromDisplayName || `<@${r.fromUserId}>`;
-    const date = new Date(r.createdAt).toLocaleDateString();
-    return `${i + 1}. *${r.message}*\n   _from ${from} on ${date}_`;
+    let line = `${i + 1}. *${r.title}*`;
+    if (r.notes) {
+      // Extract "From:" from notes
+      const fromMatch = r.notes.match(/From:\s*(.+)/);
+      if (fromMatch) {
+        line += `\n   _from ${fromMatch[1]}_`;
+      }
+    }
+    return line;
   });
   
-  return `📬 *Inbox* (${reminders.length} reminder${reminders.length === 1 ? "" : "s"}):\n\n${lines.join("\n\n")}`;
+  return `📬 *Inbox* (${reminders.length} reminder${reminders.length === 1 ? "" : "s"}):\n\n${lines.join("\n\n")}\n\n_Reminders sync to Apple Reminders "Jibot" list_`;
 }
+
+// Initialize on load
+ensureJibotList();

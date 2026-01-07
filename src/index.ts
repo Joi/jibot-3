@@ -154,36 +154,93 @@ function isHelpCommand(text: string): boolean {
  * Format help message based on user tier
  */
 function formatHelp(tier: Tier): string {
-  let help = `🤖 *Jibot 3* - Community memory bot!
+  const sections: string[] = [];
 
-*Everyone can:*
-• \`jibot @user is [fact]\` - Teach me about someone
-• \`who is @user?\` - Ask what I know
-• \`jibot forget @user\` - Manage facts
-• \`remind joi to [thing]\` - Add to Joi's inbox
-• \`explain [concept]\` - Look up a concept
-• \`what is [organization]\` - Look up an org
+  // Header
+  sections.push(`🤖 *Jibot 3* - Community memory & knowledge bot
+_Descendant of the original Jibot IRC bot (2004)_`);
 
-*Example:*
-> jibot @alice is a tea ceremony teacher
-> remind joi to review Alice's proposal`;
+  // Community Memory section - everyone
+  sections.push(`*📝 Community Memory*
+Learn and recall facts about people in the community.
 
+• \`jibot @user is [fact]\` - Teach me something about someone
+• \`who is @user?\` - Ask what I know about someone
+• \`jibot forget @user\` - List all facts about someone
+• \`jibot forget @user [n]\` - Forget a specific fact (#1, #2, etc.)
+• \`jibot forget @user all\` - Forget everything about someone
+
+_Example:_
+> jibot @alice is a tea ceremony teacher from Kyoto
+> who is @alice?
+> → "Alice is a tea ceremony teacher from Kyoto"`);
+
+  // Reminder Inbox section - everyone
+  sections.push(`*📥 Reminder Inbox*
+Send reminders directly to Joi's Apple Reminders.
+
+• \`remind joi to [message]\` - Add a reminder to Joi's inbox
+
+_Example:_
+> remind joi to review the grant proposal
+> → Added to Joi's "Jibot" reminders list`);
+
+  // Knowledge Lookup section - everyone
+  sections.push(`*💡 Knowledge Lookup*
+Look up concepts and organizations from the knowledge base.
+
+• \`explain [concept]\` - Look up a concept (DAOs, Web3, Neurodiversity, etc.)
+• \`what is [organization]\` - Look up an organization (Digital Garage, METI, etc.)
+
+_Example:_
+> explain probabilistic computing
+> what is Henkaku Center`);
+
+  // Herald feature - everyone
+  sections.push(`*👋 Channel Heralds*
+When someone joins a channel, I greet them with what I know about them.
+This helps the community remember who people are.`);
+
+  // Admin section
   if (tier === "admin" || tier === "owner") {
-    help += `\n\n*Admin commands:*
-• \`/jibot inbox\` - View reminder queue`;
+    sections.push(`*🛡️ Admin Commands*
+You have admin access to view operational information.
+
+• \`/jibot inbox\` - View the reminder queue
+• \`/jibot admins\` - List all admins and owner`);
   }
 
+  // Owner section
   if (tier === "owner") {
-    help += `\n\n*Owner commands:*
-• \`/jibot inbox clear [n]\` - Clear reminder
-• \`/jibot inbox clear all\` - Clear all
-• \`/jibot admin @user\` - Promote to admin
-• \`/jibot demote @user\` - Demote admin
-• \`/jibot link @user [UID]\` - Link cross-workspace ID`;
+    sections.push(`*👑 Owner Commands*
+You have full control over Jibot.
+
+*Inbox Management:*
+• \`/jibot inbox clear [n]\` - Complete/clear reminder #n
+• \`/jibot inbox clear all\` - Clear all reminders
+
+*Permission Management:*
+• \`/jibot admin @user\` - Promote user to admin
+• \`/jibot demote @user\` - Demote admin to guest
+
+*Cross-Workspace Identity:*
+• \`/jibot link @user [UID]\` - Link another Slack UID to an admin's identity
+  _(Use when same person has different IDs in different workspaces)_`);
   }
 
-  help += `\n\nI also greet people when they join! 👋`;
-  return help;
+  // Slash command note
+  sections.push(`*⚡ Slash Commands*
+Use \`/jibot [command]\` for quick access:
+• \`/jibot help\` - Show this help
+• \`/jibot explain [concept]\` - Quick concept lookup
+• \`/jibot whatis [org]\` - Quick org lookup
+• \`/jibot remind [message]\` - Quick reminder`);
+
+  // Footer with tier indicator
+  const tierLabel = tier === "owner" ? "👑 Owner" : tier === "admin" ? "🛡️ Admin" : "👤 Guest";
+  sections.push(`_Your access level: ${tierLabel}_`);
+
+  return sections.join("\n\n───────────────────────────\n\n");
 }
 
 /**
@@ -532,7 +589,7 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
         if (!isNaN(num) && num >= 1) {
           const cleared = clearReminderByIndex(num);
           if (cleared) {
-            await respond({ text: `✅ Cleared reminder #${num}: "${cleared.message}"`, response_type: "ephemeral" });
+            await respond({ text: `✅ Cleared reminder #${num}: "${cleared.title}"`, response_type: "ephemeral" });
           } else {
             await respond({ text: `❌ No reminder #${num} found.`, response_type: "ephemeral" });
           }
