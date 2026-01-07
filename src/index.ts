@@ -35,7 +35,7 @@ const app = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
   socketMode: true,
   appToken: process.env.SLACK_APP_TOKEN,
-  logLevel: LogLevel.INFO,
+  logLevel: LogLevel.DEBUG,
 });
 
 // ============================================================================
