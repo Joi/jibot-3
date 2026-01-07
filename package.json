@@ -10,7 +10,11 @@
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["slack", "bot", "jibot"],
+  "keywords": [
+    "slack",
+    "bot",
+    "jibot"
+  ],
   "author": "Joi Ito",
   "license": "MIT",
   "repository": {
@@ -19,7 +23,9 @@
   },
   "dependencies": {
     "@slack/bolt": "^4.1.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "googleapis": "^169.0.0",
+    "openai": "^6.15.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

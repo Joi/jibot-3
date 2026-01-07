@@ -56,6 +56,10 @@ import {
   lookupOrganization,
   searchSwitchboard,
 } from "./switchboard.js";
+import {
+  addToCalendarNaturalLanguage,
+  isCalendarConfigured,
+} from "./calendar.js";
 
 // Initialize the Slack app
 const app = new App({
@@ -146,6 +150,62 @@ function isHelpCommand(text: string): boolean {
   return lower === "jibot" || lower === "jibot help" || lower === "jibot?";
 }
 
+/**
+ * Parse "jibot setowner" command (first-time setup)
+ */
+function isSetOwnerCommand(text: string): boolean {
+  return text.toLowerCase().trim() === "jibot setowner";
+}
+
+/**
+ * Parse "jibot inbox" command
+ */
+function isInboxCommand(text: string): boolean {
+  return text.toLowerCase().trim() === "jibot inbox";
+}
+
+/**
+ * Parse "jibot inbox clear [n|all]" command
+ */
+function parseInboxClearCommand(text: string): { target: string } | null {
+  const match = text.match(/^jibot\s+inbox\s+clear\s+(.+)$/i);
+  if (match) {
+    return { target: match[1].trim().toLowerCase() };
+  }
+  return null;
+}
+
+/**
+ * Parse "jibot admin @user" command
+ */
+function parseAdminCommand(text: string): { userId: string } | null {
+  const match = text.match(/^jibot\s+admin\s+<@([A-Z0-9]+)>$/i);
+  if (match) {
+    return { userId: match[1] };
+  }
+  return null;
+}
+
+/**
+ * Parse calendar add command
+ * Matches: "add X to joi's calendar", "add X to calendar", "calendar add X"
+ */
+function parseCalendarCommand(text: string): { request: string } | null {
+  // Match: add [something] to [joi's/the] calendar
+  let match = text.match(/^add\s+(.+?)\s+to\s+(?:joi'?s?\s+)?calendar$/i);
+  if (match) {
+    return { request: match[1].trim() };
+  }
+  
+  // Match: calendar add [something]
+  match = text.match(/^calendar\s+add\s+(.+)$/i);
+  if (match) {
+    return { request: match[1].trim() };
+  }
+  
+  return null;
+}
+
 // ============================================================================
 // Message Handlers
 // ============================================================================
@@ -207,7 +267,17 @@ This helps the community remember who people are.`);
 You have admin access to view operational information.
 
 • \`/jibot inbox\` - View the reminder queue
-• \`/jibot admins\` - List all admins and owner`);
+• \`/jibot admins\` - List all admins and owner
+
+*📅 Calendar Management*
+Add events to Joi's Google Calendar using natural language.
+
+• \`@jibot add [event] to calendar\` - Add an event
+• \`@jibot calendar add [event]\` - Alternative syntax
+
+_Examples:_
+> @jibot add meeting with Alice tomorrow at 2pm to calendar
+> @jibot add "Board meeting" next Monday 10am-12pm to calendar`);
   }
 
   // Owner section
@@ -441,6 +511,108 @@ app.message(async ({ message, say, client }) => {
     await say(handleExplain(explainCmd.query, explainCmd.type));
     return;
   }
+
+  // === Owner/Admin commands via message (no slash command needed) ===
+
+  // jibot setowner - First-time setup
+  if (isSetOwnerCommand(text)) {
+    if (isOwnerConfigured()) {
+      await say("❌ Owner already configured.");
+    } else {
+      setOwner(senderId);
+      await say(`✅ <@${senderId}> is now the owner of Jibot!`);
+    }
+    return;
+  }
+
+  // jibot inbox - View inbox (admin+)
+  if (isInboxCommand(text)) {
+    if (!hasPermission(senderId, "admin")) {
+      await say("❌ You need admin permissions to view the inbox.");
+      return;
+    }
+    const reminders = getReminders();
+    await say(formatInbox(reminders));
+    return;
+  }
+
+  // jibot inbox clear [n|all] - Clear inbox (owner only)
+  const inboxClearCmd = parseInboxClearCommand(text);
+  if (inboxClearCmd) {
+    if (!hasPermission(senderId, "owner")) {
+      await say("❌ Only the owner can clear the inbox.");
+      return;
+    }
+    if (inboxClearCmd.target === "all") {
+      const count = clearAllReminders();
+      await say(`✅ Cleared all ${count} reminders.`);
+    } else {
+      const num = parseInt(inboxClearCmd.target);
+      if (!isNaN(num) && num >= 1) {
+        const cleared = clearReminderByIndex(num);
+        if (cleared) {
+          await say(`✅ Cleared reminder #${num}: "${cleared.title}"`);
+        } else {
+          await say(`❌ No reminder #${num} found.`);
+        }
+      } else {
+        await say("Usage: `jibot inbox clear [number|all]`");
+      }
+    }
+    return;
+  }
+
+  // jibot admin @user - Promote to admin (owner only)
+  const adminCmd = parseAdminCommand(text);
+  if (adminCmd) {
+    if (!hasPermission(senderId, "owner")) {
+      await say("❌ Only the owner can promote admins.");
+      return;
+    }
+    let displayName: string | undefined;
+    try {
+      const userInfo = await client.users.info({ user: adminCmd.userId });
+      displayName = userInfo.user?.profile?.display_name || userInfo.user?.real_name;
+    } catch (e) {}
+    promoteToAdmin(adminCmd.userId, displayName);
+    await say(`✅ <@${adminCmd.userId}> is now an admin.`);
+    return;
+  }
+
+  // Calendar add command (admin+ only) - works in DMs too
+  const calendarCmd = parseCalendarCommand(text);
+  if (calendarCmd) {
+    if (!hasPermission(senderId, "admin")) {
+      await say("❌ You need admin permissions to add calendar events.");
+      return;
+    }
+
+    if (!isCalendarConfigured()) {
+      await say("❌ Google Calendar not configured.");
+      return;
+    }
+
+    let senderName = `<@${senderId}>`;
+    try {
+      const userInfo = await client.users.info({ user: senderId });
+      senderName = userInfo.user?.profile?.display_name || userInfo.user?.real_name || senderName;
+    } catch (e) {}
+
+    await say(`⏳ Processing: "${calendarCmd.request}"...`);
+
+    const result = await addToCalendarNaturalLanguage(calendarCmd.request, senderName);
+    
+    if (result.success) {
+      let response = result.message;
+      if (result.eventLink) {
+        response += `\n<${result.eventLink}|View in Calendar>`;
+      }
+      await say(response);
+    } else {
+      await say(`❌ ${result.message}`);
+    }
+    return;
+  }
 });
 
 // Handle app mentions
@@ -505,6 +677,51 @@ app.event("app_mention", async ({ event, say, client }) => {
   const whatIsMatch = text.match(/^what\s+is\s+(.+)\??$/i);
   if (whatIsMatch) {
     await say({ text: handleExplain(whatIsMatch[1].trim(), "org"), thread_ts: event.ts });
+    return;
+  }
+
+  // Calendar add command (admin+ only)
+  const calendarCmd = parseCalendarCommand(text);
+  if (calendarCmd) {
+    if (!hasPermission(senderId, "admin")) {
+      await say({ 
+        text: "❌ You need admin permissions to add calendar events.",
+        thread_ts: event.ts 
+      });
+      return;
+    }
+
+    if (!isCalendarConfigured()) {
+      await say({ 
+        text: "❌ Google Calendar not configured. Missing credentials.",
+        thread_ts: event.ts 
+      });
+      return;
+    }
+
+    // Get sender's display name for attribution
+    let senderName = `<@${senderId}>`;
+    try {
+      const userInfo = await client.users.info({ user: senderId });
+      senderName = userInfo.user?.profile?.display_name || userInfo.user?.real_name || senderName;
+    } catch (e) {}
+
+    await say({ 
+      text: `⏳ Processing: "${calendarCmd.request}"...`,
+      thread_ts: event.ts 
+    });
+
+    const result = await addToCalendarNaturalLanguage(calendarCmd.request, senderName);
+    
+    if (result.success) {
+      let response = result.message;
+      if (result.eventLink) {
+        response += `\n<${result.eventLink}|View in Calendar>`;
+      }
+      await say({ text: response, thread_ts: event.ts });
+    } else {
+      await say({ text: `❌ ${result.message}`, thread_ts: event.ts });
+    }
     return;
   }
 
