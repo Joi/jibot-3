@@ -34,7 +34,7 @@ install_primary() {
         <string>/bin/bash</string>
         <string>-l</string>
         <string>-c</string>
-        <string>cd $JIBOT_DIR && npm run dev</string>
+        <string>cd $JIBOT_DIR &amp;&amp; npm run dev</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$JIBOT_DIR</string>
@@ -79,7 +79,7 @@ install_workspace2() {
         <string>/bin/bash</string>
         <string>-l</string>
         <string>-c</string>
-        <string>cd $JIBOT_DIR && env \$(cat .env.workspace2 | grep -v '^#' | xargs) npm run start</string>
+        <string>cd $JIBOT_DIR &amp;&amp; env \$(cat .env.workspace2 | grep -v '^#' | xargs) npm run start</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$JIBOT_DIR</string>
