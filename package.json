@@ -22,7 +22,9 @@
     "url": "https://github.com/Joi/jibot-3.git"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@slack/bolt": "^4.1.0",
+    "@supabase/supabase-js": "^2.90.1",
     "dotenv": "^16.4.5",
     "googleapis": "^169.0.0",
     "openai": "^6.15.0"

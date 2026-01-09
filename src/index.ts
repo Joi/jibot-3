@@ -60,6 +60,12 @@ import {
   addToCalendarNaturalLanguage,
   isCalendarConfigured,
 } from "./calendar.js";
+import {
+  isWhoopConfigured,
+  isStatusQuery,
+  getLatestRecovery,
+  formatWhoopStatus,
+} from "./whoop.js";
 
 // Initialize the Slack app
 const app = new App({
@@ -302,9 +308,13 @@ You have full control over Jibot.
   sections.push(`*⚡ Slash Commands*
 Use \`/jibot [command]\` for quick access:
 • \`/jibot help\` - Show this help
+• \`/jibot status\` - Joi's Whoop recovery score
 • \`/jibot explain [concept]\` - Quick concept lookup
 • \`/jibot whatis [org]\` - Quick org lookup
-• \`/jibot remind [message]\` - Quick reminder`);
+• \`/jibot remind [message]\` - Quick reminder
+
+*💪 Health Status*
+• \`how's Joi doing today?\` - Get Whoop recovery & sleep data`);
 
   // Footer with tier indicator
   const tierLabel = tier === "owner" ? "👑 Owner" : tier === "admin" ? "🛡️ Admin" : "👤 Guest";
@@ -318,6 +328,7 @@ Use \`/jibot [command]\` for quick access:
  */
 async function handleLearn(
   userId: string,
+  team: string,
   fact: string,
   addedBy: string,
   client: any
@@ -333,22 +344,22 @@ async function handleLearn(
     // Ignore
   }
 
-  addFact(userId, fact, addedBy, displayName, slackName);
+  addFact(userId, team, fact, addedBy, displayName, slackName);
   return `📝 Got it! I learned that <@${userId}> is ${fact}`;
 }
 
 /**
  * Handle "who is" query
  */
-function handleWhoIs(userId: string): string {
-  const facts = getFacts(userId);
+function handleWhoIs(userId: string, team: string): string {
+  const facts = getFacts(userId, team);
   
   if (facts.length === 0) {
     return `🤷 I don't know anything about <@${userId}> yet. Tell me something!\nSay: \`jibot <@${userId}> is ...\``;
   }
 
   const factsSentence = formatFactsSentence(facts);
-  const name = getDisplayName(userId);
+  const name = getDisplayName(userId, team);
   
   if (name) {
     return `🤖 ${name} (<@${userId}>) is ${factsSentence}.`;
@@ -359,8 +370,8 @@ function handleWhoIs(userId: string): string {
 /**
  * Handle forget command
  */
-function handleForget(userId: string, index: number | null): string {
-  const facts = getFacts(userId);
+function handleForget(userId: string, team: string, index: number | null): string {
+  const facts = getFacts(userId, team);
 
   if (index === null) {
     if (facts.length === 0) {
@@ -371,7 +382,7 @@ function handleForget(userId: string, index: number | null): string {
   }
 
   if (index === -1) {
-    const count = removeAllFacts(userId);
+    const count = removeAllFacts(userId, team);
     if (count === 0) {
       return `🤷 I don't know anything about <@${userId}> to forget.`;
     }
@@ -383,7 +394,7 @@ function handleForget(userId: string, index: number | null): string {
   }
 
   const factToRemove = facts[index].fact;
-  removeFact(userId, index);
+  removeFact(userId, team, index);
   return `🗑️ I've forgotten that <@${userId}> is ${factToRemove}.`;
 }
 
@@ -478,7 +489,7 @@ app.message(async ({ message, say, client }) => {
   // Learn command
   const learnCmd = parseLearnCommand(text);
   if (learnCmd) {
-    const response = await handleLearn(learnCmd.userId, learnCmd.fact, senderId, client);
+    const response = await handleLearn(learnCmd.userId, team, learnCmd.fact, senderId, client);
     await say(response);
     return;
   }
@@ -486,14 +497,14 @@ app.message(async ({ message, say, client }) => {
   // Who is command
   const whoIsUserId = parseWhoIsCommand(text);
   if (whoIsUserId) {
-    await say(handleWhoIs(whoIsUserId));
+    await say(handleWhoIs(whoIsUserId, team));
     return;
   }
 
   // Forget command
   const forgetCmd = parseForgetCommand(text);
   if (forgetCmd) {
-    await say(handleForget(forgetCmd.userId, forgetCmd.index));
+    await say(handleForget(forgetCmd.userId, team, forgetCmd.index));
     return;
   }
 
@@ -509,6 +520,21 @@ app.message(async ({ message, say, client }) => {
   const explainCmd = parseExplainCommand(text);
   if (explainCmd) {
     await say(handleExplain(explainCmd.query, explainCmd.type));
+    return;
+  }
+
+  // "How's Joi doing" - Whoop status query
+  if (isStatusQuery(text)) {
+    if (!isWhoopConfigured()) {
+      await say("⚠️ Whoop integration not configured.");
+      return;
+    }
+    const status = await getLatestRecovery();
+    if (status) {
+      await say(`📊 *Joi's Whoop Status*\n\n${formatWhoopStatus(status)}`);
+    } else {
+      await say("⚠️ Couldn't fetch Whoop data. Check the connection.");
+    }
     return;
   }
 
@@ -621,6 +647,81 @@ app.event("app_mention", async ({ event, say, client }) => {
   const senderId = event.user!;
   const channel = event.channel!;
   const team = (event as any).team || "unknown";
+  const threadTs = (event as any).thread_ts;
+
+  // Empty mention in a thread = save parent message as todo
+  if (!text && threadTs) {
+    try {
+      // Fetch the parent message
+      const result = await client.conversations.replies({
+        channel: channel,
+        ts: threadTs,
+        limit: 1,
+        inclusive: true
+      });
+      
+      const parentMsg = result.messages?.[0];
+      if (parentMsg && parentMsg.text) {
+        // Build permalink to the message
+        const permalinkResult = await client.chat.getPermalink({
+          channel: channel,
+          message_ts: threadTs
+        });
+        const permalink = permalinkResult.permalink || "";
+        
+        // Get sender name for context
+        let senderName = "Someone";
+        try {
+          const userInfo = await client.users.info({ user: parentMsg.user || "" });
+          senderName = userInfo.user?.real_name || userInfo.user?.name || "Someone";
+        } catch {}
+        
+        // Truncate message for title (first 100 chars)
+        const msgPreview = parentMsg.text
+          .replace(/<[^>]+>/g, "")  // Remove Slack formatting
+          .substring(0, 100)
+          .trim();
+        const title = msgPreview + (parentMsg.text.length > 100 ? "..." : "");
+        
+        // Create reminder with link
+        const notes = `From ${senderName} in Slack:\n${permalink}`;
+        
+        const bridgePath = process.env.HOME + "/jibot-3/scripts/amplifier_bridge.py";
+        const { execSync } = await import("child_process");
+        
+        const escapedTitle = title.replace(/'/g, "'\\''");
+        const escapedNotes = notes.replace(/'/g, "'\\''");
+        const cmd = `${bridgePath} reminders add '${escapedTitle}' 'Jibot' '${escapedNotes}'`;
+        
+        const bridgeResult = execSync(cmd, { encoding: "utf-8", timeout: 10000 });
+        const parsed = JSON.parse(bridgeResult.trim());
+        
+        if (parsed.success) {
+          await say({ 
+            text: `✅ This message added to reminders`,
+            thread_ts: event.ts 
+          });
+        } else {
+          await say({ 
+            text: `❌ Couldn't save: ${parsed.error}`,
+            thread_ts: event.ts 
+          });
+        }
+      } else {
+        await say({ 
+          text: "❌ Couldn't find the parent message",
+          thread_ts: event.ts 
+        });
+      }
+    } catch (error: any) {
+      console.error("Thread-to-todo error:", error);
+      await say({ 
+        text: `❌ Error saving message: ${error.message}`,
+        thread_ts: event.ts 
+      });
+    }
+    return;
+  }
 
   if (!text || text.toLowerCase() === "help") {
     const tier = getTier(senderId);
@@ -631,7 +732,7 @@ app.event("app_mention", async ({ event, say, client }) => {
   // Learn command
   const learnMatch = text.match(/^<@([A-Z0-9]+)>\s+is\s+(.+)$/i);
   if (learnMatch) {
-    const response = await handleLearn(learnMatch[1], learnMatch[2].trim(), senderId, client);
+    const response = await handleLearn(learnMatch[1], team, learnMatch[2].trim(), senderId, client);
     await say({ text: response, thread_ts: event.ts });
     return;
   }
@@ -639,7 +740,7 @@ app.event("app_mention", async ({ event, say, client }) => {
   // Who is
   const whoIsMatch = text.match(/who\s+is\s+<@([A-Z0-9]+)>\??/i);
   if (whoIsMatch) {
-    await say({ text: handleWhoIs(whoIsMatch[1]), thread_ts: event.ts });
+    await say({ text: handleWhoIs(whoIsMatch[1], team), thread_ts: event.ts });
     return;
   }
 
@@ -654,7 +755,7 @@ app.event("app_mention", async ({ event, say, client }) => {
       const num = parseInt(arg);
       if (!isNaN(num) && num >= 1) index = num - 1;
     }
-    await say({ text: handleForget(userId, index), thread_ts: event.ts });
+    await say({ text: handleForget(userId, team, index), thread_ts: event.ts });
     return;
   }
 
@@ -677,6 +778,21 @@ app.event("app_mention", async ({ event, say, client }) => {
   const whatIsMatch = text.match(/^what\s+is\s+(.+)\??$/i);
   if (whatIsMatch) {
     await say({ text: handleExplain(whatIsMatch[1].trim(), "org"), thread_ts: event.ts });
+    return;
+  }
+
+  // "How's Joi doing" - Whoop status query (via @mention)
+  if (isStatusQuery(text)) {
+    if (!isWhoopConfigured()) {
+      await say({ text: "⚠️ Whoop integration not configured.", thread_ts: event.ts });
+      return;
+    }
+    const status = await getLatestRecovery();
+    if (status) {
+      await say({ text: `📊 *Joi's Whoop Status*\n\n${formatWhoopStatus(status)}`, thread_ts: event.ts });
+    } else {
+      await say({ text: "⚠️ Couldn't fetch Whoop data.", thread_ts: event.ts });
+    }
     return;
   }
 
@@ -732,11 +848,12 @@ app.event("app_mention", async ({ event, say, client }) => {
 });
 
 // Herald on channel join
-app.event("member_joined_channel", async ({ event, client }) => {
+app.event("member_joined_channel", async ({ event, client, body }) => {
+  const team = (body as any).team_id || "unknown";
   const userId = event.user;
   const channelId = event.channel;
-  const facts = getFacts(userId);
-  const person = getPerson(userId);
+  const facts = getFacts(userId, team);
+  const person = getPerson(userId, team);
   
   let greeting: string;
   if (facts.length > 0) {
@@ -971,6 +1088,21 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
       return;
     }
     await respond({ text: handleExplain(query, "org"), response_type: "ephemeral" });
+    return;
+  }
+
+  // /jibot status - Whoop recovery status
+  if (subcommand === "status" || subcommand === "whoop" || subcommand === "recovery") {
+    if (!isWhoopConfigured()) {
+      await respond({ text: "⚠️ Whoop integration not configured.", response_type: "ephemeral" });
+      return;
+    }
+    const status = await getLatestRecovery();
+    if (status) {
+      await respond({ text: `📊 *Joi's Whoop Status*\n\n${formatWhoopStatus(status)}`, response_type: "ephemeral" });
+    } else {
+      await respond({ text: "⚠️ Couldn't fetch Whoop data.", response_type: "ephemeral" });
+    }
     return;
   }
 
