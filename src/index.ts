@@ -404,20 +404,31 @@ function handleForget(userId: string, team: string, index: number | null): strin
 async function handleRemind(
   message: string,
   fromUserId: string,
-  workspace: string,
-  channel: string,
+  workspaceId: string,
+  channelId: string,
   client: any
 ): Promise<string> {
   let displayName: string | undefined;
+  let workspaceName = workspaceId;
+  let channelName = channelId;
   
   try {
+    // Get user display name
     const userInfo = await client.users.info({ user: fromUserId });
     displayName = userInfo.user?.profile?.display_name || userInfo.user?.real_name;
+    
+    // Get workspace name
+    const teamInfo = await client.team.info();
+    workspaceName = teamInfo.team?.name || workspaceId;
+    
+    // Get channel name
+    const channelInfo = await client.conversations.info({ channel: channelId });
+    channelName = channelInfo.channel?.name || channelId;
   } catch (e) {
-    // Ignore
+    // Fall back to IDs if lookups fail
   }
 
-  addReminder(message, fromUserId, workspace, channel, displayName);
+  addReminder(message, fromUserId, workspaceName, channelName, displayName);
   const count = getReminderCount();
   return `📥 Got it! I'll remind Joi to: *${message}*\n_Inbox now has ${count} reminder${count === 1 ? "" : "s"}_`;
 }
@@ -891,6 +902,7 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
   // Parse subcommand
   const args = text.split(/\s+/);
   const subcommand = args[0]?.toLowerCase() || "help";
+  console.log("SLASH COMMAND DEBUG:", { text: command.text, args, subcommand });
 
   // /jibot help
   if (subcommand === "help" || subcommand === "") {

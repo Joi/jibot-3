@@ -1,11 +1,12 @@
 /**
  * Reminder Inbox - Apple Reminders Integration
  * 
- * Sends reminders to Apple Reminders app via the apple_reminders.py tool.
+ * Apple Reminders is the GROUND TRUTH for all inbox items.
+ * No local storage - everything reads/writes directly to Apple Reminders.
  * Reminders go to a "Jibot" list for easy filtering.
  */
 
-import { execSync, exec } from "child_process";
+import { execSync } from "child_process";
 import * as path from "path";
 import os from "os";
 
@@ -36,7 +37,7 @@ export interface Reminder {
 }
 
 /**
- * Add a reminder to Apple Reminders
+ * Add a reminder to Apple Reminders (ground truth)
  */
 export function addReminder(
   message: string,
@@ -66,6 +67,7 @@ export function addReminder(
 
 /**
  * Get all incomplete reminders from Jibot list
+ * Apple Reminders is the ground truth - no local storage
  */
 export function getReminders(): Reminder[] {
   try {
@@ -74,8 +76,9 @@ export function getReminders(): Reminder[] {
       { encoding: "utf-8" }
     );
     
-    const data = JSON.parse(output);
-    return data.reminders || [];
+    // Python script outputs JSON array directly, not {reminders: [...]}
+    const reminders = JSON.parse(output);
+    return Array.isArray(reminders) ? reminders : [];
   } catch (error) {
     // List might not exist yet
     return [];
@@ -83,7 +86,7 @@ export function getReminders(): Reminder[] {
 }
 
 /**
- * Get reminder count
+ * Get reminder count directly from Apple Reminders
  */
 export function getReminderCount(): number {
   return getReminders().length;
