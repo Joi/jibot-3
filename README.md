@@ -127,15 +127,26 @@ People facts are stored in `~/switchboard/jibot/people.json` - outside the repo 
 - **Connection**: Socket Mode (no public URL needed)
 - **Storage**: Local JSON file (easily portable)
 
-## Future Ideas
+## Roadmap
 
+### Near-term
 - [ ] Web interface for viewing/editing facts
 - [ ] Slack slash commands (`/jibot`)
 - [ ] Import/export facts
 - [ ] Fact categories or tags
 - [ ] "On this day" - facts added on this date
-- [ ] Integration with other knowledge systems
-- [ ] Multi-workspace support
+
+### Personal Assistant Vision
+The long-term vision for Jibot is to evolve into a personal assistant that interfaces between my personal systems and colleagues on Slack:
+
+- [ ] **Task Integration**: Connect to my GTD system (Apple Reminders) — colleagues can ask Jibot what I'm working on or add items to my inbox
+- [ ] **Calendar Awareness**: Know my schedule — answer "is Joi free Thursday?" or "when is Joi's next available slot?"
+- [ ] **Knowledge Bridge**: Query my Obsidian vault and knowledge systems — surface relevant context during conversations
+- [ ] **Contact Management**: Track relationships, conversation history, and context about people across systems
+- [ ] **Delegation Interface**: Accept tasks via Slack that flow into my task management system
+- [ ] **Proactive Updates**: Notify relevant people when tasks they're waiting on are completed
+
+This would make Jibot the Slack-facing interface to my broader productivity and knowledge ecosystem.
 
 ## Philosophy
 
