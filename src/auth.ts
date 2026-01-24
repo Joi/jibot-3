@@ -49,7 +49,14 @@ export function loadAuth(): AuthStore {
   try {
     if (fs.existsSync(AUTH_FILE)) {
       const data = fs.readFileSync(AUTH_FILE, "utf-8");
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      
+      // Ensure all required fields exist with proper defaults
+      return {
+        owner: parsed.owner || "",
+        ownerLinkedIds: Array.isArray(parsed.ownerLinkedIds) ? parsed.ownerLinkedIds : [],
+        admins: (parsed.admins && typeof parsed.admins === "object") ? parsed.admins : {},
+      };
     }
   } catch (error) {
     console.error("Error loading auth store:", error);
@@ -77,14 +84,17 @@ export function getTier(userId: string): Tier {
   const store = loadAuth();
   
   // Check if owner
-  if (userId === store.owner || store.ownerLinkedIds.includes(userId)) {
+  if (userId === store.owner || store.ownerLinkedIds?.includes(userId)) {
     return "owner";
   }
   
   // Check if admin (by canonical ID or linked ID)
-  for (const [canonicalId, admin] of Object.entries(store.admins)) {
-    if (canonicalId === userId || admin.linkedIds.includes(userId)) {
-      return "admin";
+  // Defensive check: ensure admins object exists
+  if (store.admins && typeof store.admins === "object") {
+    for (const [canonicalId, admin] of Object.entries(store.admins)) {
+      if (admin && (canonicalId === userId || admin.linkedIds?.includes(userId))) {
+        return "admin";
+      }
     }
   }
   
@@ -137,8 +147,13 @@ export function promoteToAdmin(userId: string, displayName?: string): void {
   const store = loadAuth();
   
   // Don't promote if already admin
-  if (store.admins[userId]) {
+  if (store.admins && store.admins[userId]) {
     return;
+  }
+  
+  // Ensure admins object exists
+  if (!store.admins) {
+    store.admins = {};
   }
   
   store.admins[userId] = {
@@ -157,7 +172,7 @@ export function promoteToAdmin(userId: string, displayName?: string): void {
 export function demoteAdmin(canonicalId: string): boolean {
   const store = loadAuth();
   
-  if (!store.admins[canonicalId]) {
+  if (!store.admins || !store.admins[canonicalId]) {
     return false;
   }
   
@@ -173,11 +188,14 @@ export function demoteAdmin(canonicalId: string): boolean {
 export function linkAdmin(canonicalId: string, newId: string): boolean {
   const store = loadAuth();
   
-  if (!store.admins[canonicalId]) {
+  if (!store.admins || !store.admins[canonicalId]) {
     return false;
   }
   
-  if (!store.admins[canonicalId].linkedIds.includes(newId)) {
+  if (!store.admins[canonicalId].linkedIds?.includes(newId)) {
+    if (!store.admins[canonicalId].linkedIds) {
+      store.admins[canonicalId].linkedIds = [];
+    }
     store.admins[canonicalId].linkedIds.push(newId);
     saveAuth(store);
     console.log(`🔗 Linked ${newId} to admin ${canonicalId}`);
@@ -192,14 +210,16 @@ export function getCanonicalId(userId: string): string {
   const store = loadAuth();
   
   // Check owner
-  if (userId === store.owner || store.ownerLinkedIds.includes(userId)) {
+  if (userId === store.owner || store.ownerLinkedIds?.includes(userId)) {
     return store.owner;
   }
   
   // Check admins
-  for (const [canonicalId, admin] of Object.entries(store.admins)) {
-    if (canonicalId === userId || admin.linkedIds.includes(userId)) {
-      return canonicalId;
+  if (store.admins && typeof store.admins === "object") {
+    for (const [canonicalId, admin] of Object.entries(store.admins)) {
+      if (admin && (canonicalId === userId || admin.linkedIds?.includes(userId))) {
+        return canonicalId;
+      }
     }
   }
   
@@ -212,10 +232,13 @@ export function getCanonicalId(userId: string): string {
  */
 export function listAdmins(): { canonicalId: string; displayName?: string; linkedIds: string[] }[] {
   const store = loadAuth();
+  if (!store.admins || typeof store.admins !== "object") {
+    return [];
+  }
   return Object.entries(store.admins).map(([canonicalId, admin]) => ({
     canonicalId,
-    displayName: admin.displayName,
-    linkedIds: admin.linkedIds,
+    displayName: admin?.displayName,
+    linkedIds: admin?.linkedIds || [],
   }));
 }
 
