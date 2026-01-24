@@ -74,6 +74,7 @@ import {
   getLatestRecovery,
   formatWhoopStatus,
 } from "./whoop.js";
+import { createMudApiServer } from "./mud.js";
 
 // Create a custom SocketModeReceiver with longer timeout settings
 // Default clientPingTimeout is 5000ms which causes frequent "pong timeout" warnings
@@ -1179,7 +1180,14 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
 (async () => {
   const port = process.env.PORT || 3000;
   await app.start(port);
-  
+
+  // Start MUD API server for Daemon integration
+  const mudApiPort = Number(process.env.MUD_API_PORT || 3001);
+  const mudApi = createMudApiServer(mudApiPort);
+  mudApi.listen(mudApiPort, () => {
+    console.log(`   MUD API: http://localhost:${mudApiPort}/api/mud`);
+  });
+
   console.log(`🤖 Jibot 3 is running on port ${port}`);
   console.log("   Data: ~/switchboard/jibot/");
   console.log("\nFeatures:");
@@ -1190,5 +1198,6 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
   console.log("   • Explain: explain [concept]");
   console.log("   • Lookup: what is [organization]");
   console.log("   • Slash: /jibot [command]");
+  console.log("   • MUD: Daemon integration via /api/mud");
   console.log("\nFirst-time setup: /jibot setowner");
 })();
