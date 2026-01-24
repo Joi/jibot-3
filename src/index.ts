@@ -21,6 +21,14 @@ import { config } from "dotenv";
 config();
 
 import { App, LogLevel } from "@slack/bolt";
+import { SocketModeClient } from "@slack/socket-mode";
+import type { Receiver } from "@slack/bolt";
+
+// Import SocketModeReceiver with type assertion for ESM/CJS compatibility
+// The module has double-wrapping due to ESM/CJS interop: module.default.default
+import * as SocketModeReceiverModule from "@slack/bolt/dist/receivers/SocketModeReceiver.js";
+type SocketModeReceiverClass = new (opts: { appToken: string; logLevel?: LogLevel }) => Receiver & { client: SocketModeClient };
+const SocketModeReceiver = (SocketModeReceiverModule as unknown as { default: { default: SocketModeReceiverClass } }).default.default;
 import {
   addFact,
   getFacts,
@@ -67,12 +75,27 @@ import {
   formatWhoopStatus,
 } from "./whoop.js";
 
-// Initialize the Slack app
+// Create a custom SocketModeReceiver with longer timeout settings
+// Default clientPingTimeout is 5000ms which causes frequent "pong timeout" warnings
+// Increasing to 30000ms provides more resilience to network latency
+const socketModeReceiver = new SocketModeReceiver({
+  appToken: process.env.SLACK_APP_TOKEN!,
+  logLevel: LogLevel.INFO,
+});
+
+// Replace the default client with one that has longer timeout settings
+socketModeReceiver.client = new SocketModeClient({
+  appToken: process.env.SLACK_APP_TOKEN!,
+  logLevel: LogLevel.INFO,
+  clientPingTimeout: 30000,  // 30s instead of 5s default
+  serverPingTimeout: 60000,  // 60s instead of 30s default
+});
+
+// Initialize the Slack app with custom receiver
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
-  socketMode: true,
-  appToken: process.env.SLACK_APP_TOKEN,
+  receiver: socketModeReceiver,
   logLevel: LogLevel.INFO,
 });
 
