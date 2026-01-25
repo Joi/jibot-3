@@ -15,6 +15,7 @@ import {
   getPerson,
 } from "./people.js";
 import { lookupConcept, lookupOrganization, searchSwitchboard } from "./switchboard.js";
+import { isStatusQuery, getLatestRecovery, formatWhoopStatus } from "./whoop.js";
 
 // ============================================================================
 // Types
@@ -52,9 +53,15 @@ export interface MudResponse {
 /**
  * Handle speech directed at Jibot in the MUD
  */
-function handleSpeech(event: MudEvent): MudResponse {
+async function handleSpeech(event: MudEvent): Promise<MudResponse> {
   const message = event.message?.toLowerCase().trim() || "";
+  const originalMessage = event.message?.trim() || "";
   const speaker = event.speaker;
+
+  // Check for Whoop/health status queries first (uses original case for pattern matching)
+  if (isStatusQuery(originalMessage)) {
+    return handleWhoopStatus();
+  }
 
   // "who is [name]" or "what do you know about [name]"
   const whoIsMatch = message.match(/(?:who is|what do you know about)\s+(.+?)\??$/i);
@@ -215,6 +222,26 @@ function handleWhatIs(query: string): MudResponse {
 }
 
 /**
+ * Handle Whoop/health status query
+ */
+async function handleWhoopStatus(): Promise<MudResponse> {
+  const status = await getLatestRecovery();
+  
+  if (!status) {
+    return {
+      type: "say",
+      message: `*text flickers uncertainly* I can't reach the health monitoring systems right now.`,
+    };
+  }
+  
+  const formatted = formatWhoopStatus(status);
+  return {
+    type: "say",
+    message: `*biometric data streams across the display*\n\n${formatted}`,
+  };
+}
+
+/**
  * Handle help request
  */
 function handleHelp(): MudResponse {
@@ -310,7 +337,7 @@ export function createMudRouter(): Router {
   });
 
   // Main event endpoint
-  router.post("/event", (req: Request, res: Response) => {
+  router.post("/event", async (req: Request, res: Response) => {
     try {
       const event: MudEvent = req.body;
 
@@ -324,7 +351,7 @@ export function createMudRouter(): Router {
 
       switch (event.type) {
         case "speech":
-          response = handleSpeech(event);
+          response = await handleSpeech(event);
           break;
         case "arrival":
           response = handleArrival(event);
