@@ -9,7 +9,7 @@
 You're implementing the Daemon side of the Jibot MUD integration. The Jibot-3 service is running on **macazbd (172.16.0.118:3001)** and is ready to receive requests.
 
 **Already done on macazbd:**
-- Jibot-3 MUD API running at `http://172.16.0.118:3001/api/mud`
+- Jibot-3 MUD API running at `http://172.27.158.235:3001/api/mud` (ZeroTier IP)
 - Endpoints tested and working:
   - `POST /api/mud/event` - handles speech, arrival, departure, action events
   - `GET /api/mud/health` - health check
@@ -275,7 +275,7 @@ The `at_say` hook already exists but is commented as needing command system. The
 
 Before starting the daemon dev server:
 ```bash
-export JIBOT_SERVICE_URL="http://172.16.0.118:3001/api/mud"
+export JIBOT_SERVICE_URL="http://172.27.158.235:3001/api/mud"
 ```
 
 Or add to your `.env` file if using python-dotenv.
@@ -284,7 +284,7 @@ Or add to your `.env` file if using python-dotenv.
 
 From your laptop, test that you can reach macazbd:
 ```bash
-curl -X POST http://172.16.0.118:3001/api/mud/event \
+curl -X POST http://172.27.158.235:3001/api/mud/event \
   -H "Content-Type: application/json" \
   -d '{"type":"speech","speaker":{"name":"Test"},"message":"help","context":"mud"}'
 ```
@@ -399,7 +399,7 @@ bd close daemon-4zk.3 --reason "Implemented ask/tell jibot commands, wired to ji
 │  └─────────────────────┘    │         │  │ handleArrival()     │    │
 │                             │         │  └─────────────────────┘    │
 │  JIBOT_SERVICE_URL=         │         │                             │
-│  http://172.16.0.118:3001   │         │  Listening on :3001         │
+│  http://172.27.158.235:3001 │         │  Listening on :3001         │
 │                             │         │                             │
 └─────────────────────────────┘         └─────────────────────────────┘
 ```
