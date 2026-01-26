@@ -434,9 +434,194 @@ export function createMudApiServer(port: number = 3001): express.Application {
       service: "jibot-3",
       apis: {
         mud: "/api/mud",
+        slack: "/api/slack",
       },
     });
   });
 
   return app;
+}
+
+// ============================================================================
+// Slack API - For external posting
+// ============================================================================
+
+/**
+ * Slack client instance (set by index.ts after app initialization)
+ */
+let slackClient: any = null;
+
+/**
+ * Set the Slack client for API use
+ */
+export function setSlackClient(client: any): void {
+  slackClient = client;
+}
+
+/**
+ * Get the Slack client
+ */
+export function getSlackClient(): any {
+  return slackClient;
+}
+
+/**
+ * Create Slack API router for external posting
+ */
+export function createSlackRouter(): Router {
+  const router = Router();
+
+  // Health check
+  router.get("/health", (_req: Request, res: Response) => {
+    res.json({ 
+      status: slackClient ? "ok" : "no_client", 
+      service: "jibot-slack-api" 
+    });
+  });
+
+  // Post message to channel
+  router.post("/post", async (req: Request, res: Response) => {
+    try {
+      if (!slackClient) {
+        res.status(503).json({ error: "Slack client not initialized" });
+        return;
+      }
+
+      const { channel, message, user } = req.body;
+
+      if (!channel || !message) {
+        res.status(400).json({ 
+          error: "Missing required fields", 
+          required: ["channel", "message"],
+          optional: ["user (to mention)"]
+        });
+        return;
+      }
+
+      // If user is provided as a name, try to look up their ID
+      let finalMessage = message;
+      if (user) {
+        // Check if it's already a user ID format
+        if (user.match(/^U[A-Z0-9]+$/)) {
+          finalMessage = `<@${user}> ${message}`;
+        } else {
+          // Try to find user by name
+          try {
+            const usersResult = await slackClient.users.list({ limit: 500 });
+            const foundUser = usersResult.members?.find((m: any) => 
+              m.real_name?.toLowerCase().includes(user.toLowerCase()) ||
+              m.profile?.display_name?.toLowerCase().includes(user.toLowerCase())
+            );
+            if (foundUser) {
+              finalMessage = `<@${foundUser.id}> ${message}`;
+            }
+          } catch (e) {
+            // If lookup fails, just use the name as-is
+            finalMessage = `@${user} ${message}`;
+          }
+        }
+      }
+
+      // Find channel ID if name provided
+      let channelId = channel;
+      if (!channel.match(/^[CD][A-Z0-9]+$/)) {
+        // It's a channel name, look it up
+        try {
+          const channelsResult = await slackClient.users.conversations({ 
+            types: "public_channel,private_channel",
+            limit: 500 
+          });
+          const foundChannel = channelsResult.channels?.find((c: any) => 
+            c.name?.toLowerCase() === channel.toLowerCase().replace(/^#/, "")
+          );
+          if (foundChannel) {
+            channelId = foundChannel.id;
+          } else {
+            res.status(404).json({ error: `Channel "${channel}" not found` });
+            return;
+          }
+        } catch (e: any) {
+          res.status(500).json({ error: `Failed to look up channel: ${e.message}` });
+          return;
+        }
+      }
+
+      // Post the message
+      const result = await slackClient.chat.postMessage({
+        channel: channelId,
+        text: finalMessage,
+      });
+
+      res.json({ 
+        success: true, 
+        channel: channelId,
+        ts: result.ts,
+        message: finalMessage
+      });
+
+    } catch (error: any) {
+      console.error("Slack API post error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Look up user by name
+  router.get("/user", async (req: Request, res: Response) => {
+    try {
+      if (!slackClient) {
+        res.status(503).json({ error: "Slack client not initialized" });
+        return;
+      }
+
+      const name = req.query.name as string;
+      if (!name) {
+        res.status(400).json({ error: "Missing 'name' query parameter" });
+        return;
+      }
+
+      const usersResult = await slackClient.users.list({ limit: 500 });
+      const matches = usersResult.members?.filter((m: any) => 
+        m.real_name?.toLowerCase().includes(name.toLowerCase()) ||
+        m.profile?.display_name?.toLowerCase().includes(name.toLowerCase())
+      ).map((m: any) => ({
+        id: m.id,
+        name: m.real_name,
+        display_name: m.profile?.display_name,
+      }));
+
+      res.json({ matches: matches || [] });
+
+    } catch (error: any) {
+      console.error("Slack API user lookup error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // List channels bot is in
+  router.get("/channels", async (_req: Request, res: Response) => {
+    try {
+      if (!slackClient) {
+        res.status(503).json({ error: "Slack client not initialized" });
+        return;
+      }
+
+      const channelsResult = await slackClient.users.conversations({ 
+        types: "public_channel,private_channel",
+        limit: 500 
+      });
+      
+      const channels = channelsResult.channels?.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+      }));
+
+      res.json({ channels: channels || [] });
+
+    } catch (error: any) {
+      console.error("Slack API channels error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  return router;
 }

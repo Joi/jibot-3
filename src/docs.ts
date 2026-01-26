@@ -133,7 +133,16 @@ Jibot has three permission tiers with different access levels.
 • Add calendar events
 • Promote/demote admins
 • Link identities across workspaces
+• Post messages to any channel as Jibot
 • Set by: \`/jibot setowner\` (first-time only)
+
+*Posting Messages (Owner Only):*
+\`\`\`
+/jibot post #channel Hello!           → Post to channel
+/jibot post @user Hey there!          → DM a user
+/jibot post #dev @bob Check this out  → Mention in channel
+\`\`\`
+Also available via API: \`POST http://localhost:3001/api/slack/post\`
 
 *⭐ Admin*
 • View inbox (read-only)
@@ -188,6 +197,7 @@ jibot help                   → Show help
 /jibot admins                → List admins (admin+)
 /jibot link @user UID        → Link admin identity (owner)
 /jibot linkuser @user T:U    → Link person across workspaces (admin+)
+/jibot post #channel msg     → Post to channel (owner)
 /jibot setowner              → Claim ownership (first-time)
 \`\`\`
 
@@ -448,7 +458,16 @@ Jibotには3つの権限レベルがあります。
 • カレンダーイベントの追加
 • 管理者の昇格・降格
 • ワークスペース間のID紐づけ
+• Jibotとしてチャンネルにメッセージ投稿
 • 設定方法：\`/jibot setowner\`（初回のみ）
+
+*メッセージ投稿（オーナーのみ）:*
+\`\`\`
+/jibot post #channel こんにちは！    → チャンネルに投稿
+/jibot post @user やあ！            → ユーザーにDM
+/jibot post #dev @bob 確認して      → チャンネルでメンション
+\`\`\`
+API経由も可能: \`POST http://localhost:3001/api/slack/post\`
 
 *⭐ 管理者*
 • インボックスの表示（読み取り専用）
@@ -503,6 +522,7 @@ jibot help                   → ヘルプを表示
 /jibot admins                → 管理者一覧（管理者+）
 /jibot link @user UID        → 管理者ID紐づけ（オーナー）
 /jibot linkuser @user T:U    → ユーザー紐づけ（管理者+）
+/jibot post #channel msg     → チャンネルに投稿（オーナー）
 /jibot setowner              → オーナー設定（初回）
 \`\`\`
 

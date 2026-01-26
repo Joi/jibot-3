@@ -65,6 +65,11 @@ import {
   searchSwitchboard,
 } from "./switchboard.js";
 import {
+  getDocs,
+  getDocsJa,
+  getDocsTopics,
+} from "./docs.js";
+import {
   addToCalendarNaturalLanguage,
   isCalendarConfigured,
 } from "./calendar.js";
@@ -74,7 +79,7 @@ import {
   getLatestRecovery,
   formatWhoopStatus,
 } from "./whoop.js";
-import { createMudApiServer } from "./mud.js";
+import { createMudApiServer, setSlackClient, createSlackRouter } from "./mud.js";
 
 // Create a custom SocketModeReceiver with longer timeout settings
 // Default clientPingTimeout is 5000ms which causes frequent "pong timeout" warnings
@@ -934,6 +939,28 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
     return;
   }
 
+  // /jibot docs [topic] - Show documentation (owner gets full docs)
+  if (subcommand === "docs") {
+    const isJapanese = args[1]?.toLowerCase() === "ja";
+    const topicArg = isJapanese ? args[2] : args[1];
+    
+    let docsText: string;
+    if (isJapanese) {
+      docsText = getDocsJa(topicArg);
+    } else {
+      docsText = getDocs(topicArg);
+    }
+    
+    // Add available topics footer if showing overview
+    if (!topicArg || topicArg === "full" || topicArg === "all") {
+      const topics = getDocsTopics().join(", ");
+      docsText += `\n\n_Available topics: ${topics}_`;
+    }
+    
+    await respond({ text: docsText, response_type: "ephemeral" });
+    return;
+  }
+
   // /jibot inbox - View inbox (admin+)
   if (subcommand === "inbox") {
     if (!hasPermission(userId, "admin")) {
@@ -1166,6 +1193,60 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
     return;
   }
 
+  // /jibot post #channel message - Post to a channel (owner only)
+  if (subcommand === "post") {
+    if (!hasPermission(userId, "owner")) {
+      await respond({ text: "❌ Only the owner can post messages via Jibot.", response_type: "ephemeral" });
+      return;
+    }
+
+    // Parse: /jibot post #channel message or /jibot post @user message
+    const channelMatch = args[1]?.match(/<#([A-Z0-9]+)\|[^>]+>/i);
+    const userMatch = args[1]?.match(/<@([A-Z0-9]+)>/i);
+    
+    if (!channelMatch && !userMatch) {
+      await respond({ 
+        text: "Usage: `/jibot post #channel message` or `/jibot post @user message`\n\nExamples:\n• `/jibot post #general Hello everyone!`\n• `/jibot post @alice Hey, check this out!`\n• `/jibot post #dev @bob I'm back!` (mention in channel)", 
+        response_type: "ephemeral" 
+      });
+      return;
+    }
+
+    const targetChannel = channelMatch ? channelMatch[1] : userMatch![1];
+    const messageText = args.slice(2).join(" ");
+
+    if (!messageText) {
+      await respond({ text: "❌ Please provide a message to post.", response_type: "ephemeral" });
+      return;
+    }
+
+    try {
+      // If posting to a user, open a DM first
+      let postChannel = targetChannel;
+      if (userMatch && !channelMatch) {
+        const dmResult = await client.conversations.open({ users: targetChannel });
+        postChannel = dmResult.channel?.id || targetChannel;
+      }
+
+      await client.chat.postMessage({
+        channel: postChannel,
+        text: messageText,
+      });
+
+      const targetLabel = channelMatch ? `<#${targetChannel}>` : `<@${targetChannel}>`;
+      await respond({ 
+        text: `✅ Posted to ${targetLabel}:\n> ${messageText}`, 
+        response_type: "ephemeral" 
+      });
+    } catch (error: any) {
+      await respond({ 
+        text: `❌ Failed to post: ${error.message}`, 
+        response_type: "ephemeral" 
+      });
+    }
+    return;
+  }
+
   // Unknown command
   await respond({ 
     text: `Unknown command: \`${subcommand}\`. Try \`/jibot help\``,
@@ -1181,11 +1262,20 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
   const port = process.env.PORT || 3000;
   await app.start(port);
 
+  // Set the Slack client for API use
+  setSlackClient(app.client);
+
   // Start MUD API server for Daemon integration
   const mudApiPort = Number(process.env.MUD_API_PORT || 3001);
   const mudApi = createMudApiServer(mudApiPort);
-  mudApi.listen(mudApiPort, () => {
-    console.log(`   MUD API: http://localhost:${mudApiPort}/api/mud`);
+  
+  // Mount Slack API for external posting
+  mudApi.use("/api/slack", createSlackRouter());
+  
+  // Bind to 0.0.0.0 to accept connections from all interfaces (including ZeroTier)
+  mudApi.listen(mudApiPort, "0.0.0.0", () => {
+    console.log(`   MUD API: http://0.0.0.0:${mudApiPort}/api/mud`);
+    console.log(`   Slack API: http://0.0.0.0:${mudApiPort}/api/slack`);
   });
 
   console.log(`🤖 Jibot 3 is running on port ${port}`);
@@ -1198,6 +1288,8 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
   console.log("   • Explain: explain [concept]");
   console.log("   • Lookup: what is [organization]");
   console.log("   • Slash: /jibot [command]");
+  console.log("   • Post: /jibot post #channel message");
   console.log("   • MUD: Daemon integration via /api/mud");
+  console.log("   • API: External posting via /api/slack/post");
   console.log("\nFirst-time setup: /jibot setowner");
 })();
