@@ -21,3 +21,6 @@ npm-debug.log*
 
 # Additional env files
 .env.workspace2
+
+# bv (beads viewer) local config and caches
+.bv/

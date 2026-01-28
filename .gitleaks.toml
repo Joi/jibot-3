@@ -1,0 +1,55 @@
+# Gitleaks configuration for jibot-3
+# https://github.com/gitleaks/gitleaks
+
+title = "jibot-3 secret scanning"
+
+[extend]
+useDefault = true
+
+# Additional rules for this project
+[[rules]]
+id = "slack-bot-token"
+description = "Slack Bot Token"
+regex = '''xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}'''
+tags = ["slack", "token"]
+
+[[rules]]
+id = "slack-app-token"
+description = "Slack App Token"
+regex = '''xapp-[0-9]-[A-Z0-9]{10,}-[0-9]{10,}-[a-zA-Z0-9]{64}'''
+tags = ["slack", "token"]
+
+[[rules]]
+id = "slack-user-token"
+description = "Slack User Token"
+regex = '''xoxp-[0-9]{10,13}-[0-9]{10,13}-[0-9]{10,13}-[a-f0-9]{32}'''
+tags = ["slack", "token"]
+
+[[rules]]
+id = "supabase-key"
+description = "Supabase API Key"
+regex = '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[a-zA-Z0-9_-]{50,}\.[a-zA-Z0-9_-]{20,}'''
+tags = ["supabase", "jwt"]
+
+[[rules]]
+id = "google-oauth-client-secret"
+description = "Google OAuth Client Secret"
+regex = '''GOCSPX-[a-zA-Z0-9_-]{28}'''
+tags = ["google", "oauth"]
+
+# Allowlist for false positives
+[allowlist]
+description = "Global allowlist"
+paths = [
+    '''\.env\.example$''',
+    '''node_modules/''',
+    '''package-lock\.json$''',
+    '''\.gitleaks\.toml$''',
+]
+
+# Allow placeholder tokens in example files
+regexes = [
+    '''xoxb-your-token''',
+    '''xapp-your-app-token''',
+    '''your-signing-secret''',
+]
