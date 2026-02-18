@@ -80,6 +80,72 @@ import {
   formatWhoopStatus,
 } from "./whoop.js";
 import { createMudApiServer, setSlackClient, createSlackRouter } from "./mud.js";
+import { startDiscordBot } from "./discord.js";
+import {
+  initVibecheck,
+  isVibecheckConfigured,
+  shouldWatchChannel,
+  getCommunityForChannel,
+  processMessageForUrls,
+} from "./vibecheck.js";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { join } from "path";
+
+// ============================================================================
+// Single Instance Lock (prevents multiple jibots from running)
+// ============================================================================
+const PID_FILE = join(process.env.HOME || "/tmp", ".jibot.pid");
+
+function acquireLock(): boolean {
+  try {
+    if (existsSync(PID_FILE)) {
+      const existingPid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+      
+      // Check if the process is still running
+      try {
+        process.kill(existingPid, 0); // Signal 0 = check if process exists
+        console.error(`[LOCK] Another jibot instance is already running (PID ${existingPid})`);
+        console.error(`[LOCK] If this is incorrect, remove ${PID_FILE} and restart`);
+        return false;
+      } catch {
+        // Process doesn't exist, stale PID file - we can take over
+        console.log(`[LOCK] Removing stale PID file (old PID ${existingPid} not running)`);
+      }
+    }
+    
+    // Write our PID
+    writeFileSync(PID_FILE, process.pid.toString(), "utf-8");
+    console.log(`[LOCK] Acquired lock (PID ${process.pid})`);
+    
+    // Clean up on exit
+    const cleanup = () => {
+      try {
+        if (existsSync(PID_FILE)) {
+          const storedPid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+          if (storedPid === process.pid) {
+            unlinkSync(PID_FILE);
+            console.log(`[LOCK] Released lock`);
+          }
+        }
+      } catch { /* ignore cleanup errors */ }
+    };
+    
+    process.on("exit", cleanup);
+    process.on("SIGINT", () => { cleanup(); process.exit(0); });
+    process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+    
+    return true;
+  } catch (error) {
+    console.error(`[LOCK] Failed to acquire lock:`, error);
+    return false;
+  }
+}
+
+// Acquire lock before starting - exit if another instance is running
+if (!acquireLock()) {
+  console.error("[LOCK] Exiting to prevent duplicate instance");
+  process.exit(1);
+}
 
 // Create a custom SocketModeReceiver with longer timeout settings
 // Default clientPingTimeout is 5000ms which causes frequent "pong timeout" warnings
@@ -519,6 +585,31 @@ app.message(async ({ message, say, client }) => {
   const channel = (message as any).channel;
   const team = (message as any).team || "unknown";
 
+  // Vibecheck URL collection (runs in background, doesn't block other handlers)
+  if (isVibecheckConfigured() && shouldWatchChannel(channel)) {
+    const communitySlug = getCommunityForChannel(channel);
+    if (communitySlug) {
+      // Get channel name and user name for context
+      let channelName = "unknown";
+      let authorName = senderId;
+      try {
+        const channelInfo = await client.conversations.info({ channel });
+        channelName = (channelInfo.channel as any)?.name || "unknown";
+        const userInfo = await client.users.info({ user: senderId });
+        authorName = userInfo.user?.real_name || userInfo.user?.name || senderId;
+      } catch {}
+      
+      // Process URLs asynchronously (don't await - let other handlers run)
+      processMessageForUrls(text, communitySlug, {
+        author: authorName,
+        channel,
+        channelName,
+        messageTs: (message as any).ts,
+        team,
+      }).catch(err => console.error("[Vibecheck] Error processing URLs:", err));
+    }
+  }
+
   // Help command
   if (isHelpCommand(text)) {
     const tier = getTier(senderId);
@@ -887,8 +978,21 @@ app.event("app_mention", async ({ event, say, client }) => {
   });
 });
 
+// Event deduplication cache (prevents double-heralding from duplicate Slack events)
+const recentHeraldEvents = new Set<string>();
+const HERALD_DEDUPE_TTL = 60000; // 60 seconds
+
 // Herald on channel join
 app.event("member_joined_channel", async ({ event, client, body }) => {
+  // Deduplicate: Slack can send the same event multiple times
+  const eventKey = `${event.user}:${event.channel}:${(event as any).event_ts || Date.now()}`;
+  if (recentHeraldEvents.has(eventKey)) {
+    console.log(`[Herald] Skipping duplicate event: ${eventKey}`);
+    return;
+  }
+  recentHeraldEvents.add(eventKey);
+  setTimeout(() => recentHeraldEvents.delete(eventKey), HERALD_DEDUPE_TTL);
+
   const team = (body as any).team_id || "unknown";
   const userId = event.user;
   const channelId = event.channel;
@@ -1278,6 +1382,15 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
     console.log(`   Slack API: http://0.0.0.0:${mudApiPort}/api/slack`);
   });
 
+  // Start Discord bot for vibecheck URL collection
+  const discordClient = await startDiscordBot();
+  if (discordClient) {
+    console.log("   Discord: Watching channels for URLs → vibecheck");
+  }
+
+  // Initialize Slack → vibecheck URL collection
+  const vibecheckEnabled = initVibecheck();
+
   console.log(`🤖 Jibot 3 is running on port ${port}`);
   console.log("   Data: ~/switchboard/jibot/");
   console.log("\nFeatures:");
@@ -1291,5 +1404,11 @@ app.command("/jibot", async ({ command, ack, respond, client }) => {
   console.log("   • Post: /jibot post #channel message");
   console.log("   • MUD: Daemon integration via /api/mud");
   console.log("   • API: External posting via /api/slack/post");
+  if (discordClient) {
+    console.log("   • Discord: URL collection for vibecheck");
+  }
+  if (vibecheckEnabled) {
+    console.log("   • Vibecheck: URL collection from Slack channels");
+  }
   console.log("\nFirst-time setup: /jibot setowner");
 })();

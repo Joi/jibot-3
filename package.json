@@ -25,14 +25,17 @@
     "@anthropic-ai/sdk": "^0.71.2",
     "@slack/bolt": "^4.1.0",
     "@supabase/supabase-js": "^2.90.1",
+    "discord.js": "^14.25.1",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "googleapis": "^169.0.0",
-    "openai": "^6.15.0"
+    "openai": "^6.15.0",
+    "pg": "^8.18.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.16.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
