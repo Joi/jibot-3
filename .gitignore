@@ -24,3 +24,6 @@ npm-debug.log*
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Beads migration artifacts
+.beads-archive-issues.jsonl
